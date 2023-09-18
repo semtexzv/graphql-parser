@@ -109,7 +109,7 @@ where
     }
 }
 
-fn format_arguments<'a, T: Text<'a>>(arguments: &[(T::Value, Value<'a, T>)], f: &mut Formatter)
+fn format_arguments<'a, T: Text<'a>>(arguments: &[(T, Value<'a, T>)], f: &mut Formatter)
 where
     T: Text<'a>,
 {
@@ -275,7 +275,7 @@ where
                 typ.display(f);
                 f.write("]");
             }
-            Type::NonNullType(ref typ) => {
+            Type::NonNullType(ref typ, ..) => {
                 typ.display(f);
                 f.write("!");
             }
@@ -289,13 +289,13 @@ where
 {
     fn display(&self, f: &mut Formatter) {
         match *self {
-            Value::Variable(ref name) => {
+            Value::Variable(ref name, ..) => {
                 f.write("$");
                 f.write(name.as_ref());
             }
             Value::Int(ref num) => f.write(&format!("{}", num.0)),
             Value::Float(val) => f.write(&format!("{}", val)),
-            Value::String(ref val) => f.write_quoted(val),
+            Value::String(ref val) => f.write_quoted(val.as_ref()),
             Value::Boolean(true) => f.write("true"),
             Value::Boolean(false) => f.write("false"),
             Value::Null => f.write("null"),
@@ -360,7 +360,7 @@ where
 {
     fn display(&self, f: &mut Formatter) {
         match *self {
-            TypeCondition::On(ref name) => {
+            TypeCondition::On(ref name, ..) => {
                 f.write("on ");
                 f.write(name.as_ref());
             }

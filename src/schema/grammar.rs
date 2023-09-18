@@ -79,6 +79,79 @@ where
         .into_result()
 }
 
+pub fn schema_extension<'a, S>(
+    input: &mut TokenStream<'a>,
+) -> StdParseResult<SchemaExtension<'a, S>, TokenStream<'a>>
+where
+    S: Text<'a>,
+{
+    (
+        position().skip((ident("extend"), ident("schema"))),
+        parser(directives),
+        optional(
+            punct("{")
+                .with(many((kind(T::Name).skip(punct(":")), name::<'a, S>())))
+                .skip(punct("}")),
+        ),
+    )
+        .flat_map(
+            |(position, directives, operations): (_, _, Option<Vec<(Token, _)>>)| {
+                let mut query = None;
+                let mut mutation = None;
+                let mut subscription = None;
+                let mut err = Errors::empty(position);
+                if let Some(operations) = operations {
+                    for (oper, type_name) in operations {
+                        match oper.value {
+                            "query" if query.is_some() => {
+                                err.add_error(Error::unexpected_static_message(
+                                    "duplicate `query` operation",
+                                ));
+                            }
+                            "query" => {
+                                query = Some(type_name);
+                            }
+                            "mutation" if mutation.is_some() => {
+                                err.add_error(Error::unexpected_static_message(
+                                    "duplicate `mutation` operation",
+                                ));
+                            }
+                            "mutation" => {
+                                mutation = Some(type_name);
+                            }
+                            "subscription" if subscription.is_some() => {
+                                err.add_error(Error::unexpected_static_message(
+                                    "duplicate `subscription` operation",
+                                ));
+                            }
+                            "subscription" => {
+                                subscription = Some(type_name);
+                            }
+                            _ => {
+                                err.add_error(Error::unexpected_token(oper));
+                                err.add_error(Error::expected_static_message("query"));
+                                err.add_error(Error::expected_static_message("mutation"));
+                                err.add_error(Error::expected_static_message("subscription"));
+                            }
+                        }
+                    }
+                }
+                if !err.errors.is_empty() {
+                    return Err(err);
+                }
+                Ok(SchemaExtension {
+                    position,
+                    directives,
+                    query,
+                    mutation,
+                    subscription,
+                })
+            },
+        )
+        .parse_stream(input)
+        .into_result()
+}
+
 pub fn scalar_type<'a, T>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<ScalarType<'a, T>, TokenStream<'a>>
@@ -132,7 +205,7 @@ where
 
 pub fn implements_interfaces<'a, X>(
     input: &mut TokenStream<'a>,
-) -> StdParseResult<Vec<X::Value>, TokenStream<'a>>
+) -> StdParseResult<Vec<X>, TokenStream<'a>>
 where
     X: Text<'a>,
 {
@@ -346,9 +419,7 @@ where
         .into_result()
 }
 
-pub fn union_members<'a, T>(
-    input: &mut TokenStream<'a>,
-) -> StdParseResult<Vec<T::Value>, TokenStream<'a>>
+pub fn union_members<'a, T>(input: &mut TokenStream<'a>) -> StdParseResult<Vec<T>, TokenStream<'a>>
 where
     T: Text<'a>,
 {
@@ -644,6 +715,7 @@ where
                 T(InputObject(ref mut o)) => o.description = descr,
                 DirectiveDefinition(ref mut d) => d.description = descr,
                 SchemaDefinition(_) => unreachable!(),
+                SchemaExtension(_) => unreachable!(),
                 TypeExtension(_) => unreachable!(),
             }
             def
@@ -679,6 +751,7 @@ where
 {
     choice((
         parser(schema).map(Definition::SchemaDefinition),
+        parser(schema_extension).map(Definition::SchemaExtension),
         parser(type_extension).map(Definition::TypeExtension),
         parser(described_definition),
     ))
@@ -722,7 +795,7 @@ mod test {
                     directives: vec![],
                     query: Some("Query".into()),
                     mutation: None,
-                    subscription: None
+                    subscription: None,
                 })],
             }
         );

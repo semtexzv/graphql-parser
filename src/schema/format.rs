@@ -51,6 +51,7 @@ where
         f.margin();
         match *self {
             Definition::SchemaDefinition(ref s) => s.display(f),
+            Definition::SchemaExtension(ref s) => s.display(f),
             Definition::TypeDefinition(ref t) => t.display(f),
             Definition::TypeExtension(ref e) => e.display(f),
             Definition::DirectiveDefinition(ref d) => d.display(f),
@@ -65,6 +66,38 @@ where
     fn display(&self, f: &mut Formatter) {
         f.indent();
         f.write("schema");
+        format_directives(&self.directives, f);
+        f.write(" ");
+        f.start_block();
+        if let Some(ref q) = self.query {
+            f.indent();
+            f.write("query: ");
+            f.write(q.as_ref());
+            f.endline();
+        }
+        if let Some(ref m) = self.mutation {
+            f.indent();
+            f.write("mutation: ");
+            f.write(m.as_ref());
+            f.endline();
+        }
+        if let Some(ref s) = self.subscription {
+            f.indent();
+            f.write("subscription: ");
+            f.write(s.as_ref());
+            f.endline();
+        }
+        f.end_block();
+    }
+}
+
+impl<'a, T> Displayable for SchemaExtension<'a, T>
+where
+    T: Text<'a>,
+{
+    fn display(&self, f: &mut Formatter) {
+        f.indent();
+        f.write("extend schema");
         format_directives(&self.directives, f);
         f.write(" ");
         f.start_block();

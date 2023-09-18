@@ -1,5 +1,6 @@
 use combine::{eof, many1, optional, position, StdParseResult};
 use combine::{parser, Parser};
+use std::marker::PhantomData;
 
 use crate::common::Directive;
 use crate::common::{arguments, default_value, directives, parse_type};
@@ -9,8 +10,8 @@ use crate::query::error::ParseError;
 use crate::tokenizer::TokenStream;
 
 pub fn field<'a, S>(input: &mut TokenStream<'a>) -> StdParseResult<Field<'a, S>, TokenStream<'a>>
-where
-    S: Text<'a>,
+    where
+        S: Text<'a>,
 {
     (
         position(),
@@ -46,15 +47,19 @@ where
 pub fn selection<'a, S>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<Selection<'a, S>, TokenStream<'a>>
-where
-    S: Text<'a>,
+    where
+        S: Text<'a>,
 {
     parser(field)
         .map(Selection::Field)
         .or(punct("...").with(
             (
                 position(),
-                optional(ident("on").with(name::<'a, S>()).map(TypeCondition::On)),
+                optional(
+                    ident("on")
+                        .with(name::<'a, S>())
+                        .map(|v| TypeCondition::On(v, PhantomData)),
+                ),
                 parser(directives),
                 parser(selection_set),
             )
@@ -79,11 +84,30 @@ where
         .into_result()
 }
 
+pub fn raw_selection_set<'a, S>(
+    input: &mut TokenStream<'a>,
+) -> StdParseResult<SelectionSet<'a, S>, TokenStream<'a>>
+    where
+        S: Text<'a>,
+{
+    (
+        position(),
+        many1(parser(selection)),
+        position(),
+    )
+        .map(|(start, items, end)| SelectionSet {
+            span: (start, end),
+            items,
+        })
+        .parse_stream(input)
+        .into_result()
+}
+
 pub fn selection_set<'a, S>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<SelectionSet<'a, S>, TokenStream<'a>>
-where
-    S: Text<'a>,
+    where
+        S: Text<'a>,
 {
     (
         position().skip(punct("{")),
@@ -101,8 +125,8 @@ where
 pub fn query<'a, T: Text<'a>>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<Query<'a, T>, TokenStream<'a>>
-where
-    T: Text<'a>,
+    where
+        T: Text<'a>,
 {
     position()
         .skip(ident("query"))
@@ -123,7 +147,7 @@ where
 /// A set of attributes common to a Query and a Mutation
 #[allow(type_alias_bounds)]
 type OperationCommon<'a, T: Text<'a>> = (
-    Option<T::Value>,
+    Option<T>,
     Vec<VariableDefinition<'a, T>>,
     Vec<Directive<'a, T>>,
     SelectionSet<'a, T>,
@@ -132,8 +156,8 @@ type OperationCommon<'a, T: Text<'a>> = (
 pub fn operation_common<'a, T: Text<'a>>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<OperationCommon<'a, T>, TokenStream<'a>>
-where
-    T: Text<'a>,
+    where
+        T: Text<'a>,
 {
     optional(name::<'a, T>())
         .and(
@@ -157,7 +181,7 @@ where
                     ))
                     .skip(punct(")")),
             )
-            .map(|vars| vars.unwrap_or_default()),
+                .map(|vars| vars.unwrap_or_default()),
         )
         .and(parser(directives))
         .and(parser(selection_set))
@@ -169,8 +193,8 @@ where
 pub fn mutation<'a, T: Text<'a>>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<Mutation<'a, T>, TokenStream<'a>>
-where
-    T: Text<'a>,
+    where
+        T: Text<'a>,
 {
     position()
         .skip(ident("mutation"))
@@ -191,8 +215,8 @@ where
 pub fn subscription<'a, T: Text<'a>>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<Subscription<'a, T>, TokenStream<'a>>
-where
-    T: Text<'a>,
+    where
+        T: Text<'a>,
 {
     position()
         .skip(ident("subscription"))
@@ -213,8 +237,8 @@ where
 pub fn operation_definition<'a, S>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<OperationDefinition<'a, S>, TokenStream<'a>>
-where
-    S: Text<'a>,
+    where
+        S: Text<'a>,
 {
     parser(selection_set)
         .map(OperationDefinition::SelectionSet)
@@ -228,13 +252,15 @@ where
 pub fn fragment_definition<'a, T: Text<'a>>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<FragmentDefinition<'a, T>, TokenStream<'a>>
-where
-    T: Text<'a>,
+    where
+        T: Text<'a>,
 {
     (
         position().skip(ident("fragment")),
         name::<'a, T>(),
-        ident("on").with(name::<'a, T>()).map(TypeCondition::On),
+        ident("on")
+            .with(name::<'a, T>())
+            .map(|v| TypeCondition::On(v, PhantomData)),
         parser(directives),
         parser(selection_set),
     )
@@ -254,8 +280,8 @@ where
 pub fn definition<'a, S>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<Definition<'a, S>, TokenStream<'a>>
-where
-    S: Text<'a>,
+    where
+        S: Text<'a>,
 {
     parser(operation_definition)
         .map(Definition::Operation)
@@ -266,8 +292,8 @@ where
 
 /// Parses a piece of query language and returns an AST
 pub fn parse_query<'a, S>(s: &'a str) -> Result<Document<'a, S>, ParseError>
-where
-    S: Text<'a>,
+    where
+        S: Text<'a>,
 {
     let mut tokens = TokenStream::new(s);
     let (doc, _) = many1(parser(definition))
@@ -283,8 +309,8 @@ where
 /// Parses a single ExecutableDefinition and returns an AST as well as the
 /// remainder of the input which is unparsed
 pub fn consume_definition<'a, S>(s: &'a str) -> Result<(Definition<'a, S>, &'a str), ParseError>
-where
-    S: Text<'a>,
+    where
+        S: Text<'a>,
 {
     let tokens = TokenStream::new(s);
     let (doc, tokens) = parser(definition).parse(tokens)?;
@@ -318,9 +344,9 @@ mod test {
                             directives: Vec::new(),
                             selection_set: SelectionSet {
                                 span: (Pos { line: 1, column: 3 }, Pos { line: 1, column: 3 }),
-                                items: Vec::new()
+                                items: Vec::new(),
                             },
-                        }),],
+                        }), ],
                     }
                 ))],
             }
@@ -338,7 +364,7 @@ mod test {
                             Pos { line: 1, column: 1 },
                             Pos {
                                 line: 1,
-                                column: 33
+                                column: 33,
                             }
                         ),
                         items: vec![Selection::Field(Field {
@@ -353,9 +379,9 @@ mod test {
                             directives: Vec::new(),
                             selection_set: SelectionSet {
                                 span: (Pos { line: 1, column: 3 }, Pos { line: 1, column: 3 }),
-                                items: Vec::new()
+                                items: Vec::new(),
                             },
-                        }),],
+                        }), ],
                     }
                 ))],
             }

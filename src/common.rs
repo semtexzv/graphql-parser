@@ -1,45 +1,42 @@
+use std::marker::PhantomData;
 use std::{collections::BTreeMap, fmt};
+use std::hash::Hash;
 
 use combine::easy::{Error, Info};
 use combine::{choice, many, many1, optional, position, StdParseResult};
 use combine::{parser, Parser};
 
-use crate::helpers::{ident, kind, name, punct};
+use crate::helpers::{_blockstring, _string, ident, kind, name, punct};
 use crate::position::Pos;
 use crate::tokenizer::{Kind as T, Token, TokenStream};
 
 /// Text abstracts over types that hold a string value.
 /// It is used to make the AST generic over the string type.
-pub trait Text<'a>: 'a {
-    type Value: 'a
-        + From<&'a str>
-        + AsRef<str>
-        + std::borrow::Borrow<str>
-        + PartialEq
-        + Eq
-        + PartialOrd
-        + Ord
-        + fmt::Debug
-        + Clone;
-}
+pub trait Text<'a>:
+'a
++ From<&'a str>
++ AsRef<str>
++ std::borrow::Borrow<str>
++ PartialEq
++ Eq
++ Hash
++ PartialOrd
++ Ord
++ fmt::Debug
++ Clone
+{}
 
-impl<'a> Text<'a> for &'a str {
-    type Value = Self;
-}
+impl<'a> Text<'a> for &'a str {}
 
-impl<'a> Text<'a> for String {
-    type Value = String;
-}
+impl<'a> Text<'a> for String {}
 
-impl<'a> Text<'a> for std::borrow::Cow<'a, str> {
-    type Value = Self;
-}
+impl<'a> Text<'a> for std::borrow::Cow<'a, str> {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Directive<'a, T: Text<'a>> {
     pub position: Pos,
-    pub name: T::Value,
-    pub arguments: Vec<(T::Value, Value<'a, T>)>,
+    pub name: T,
+    pub arguments: Vec<(T, Value<'a, T>)>,
 }
 
 /// This represents integer number
@@ -55,24 +52,24 @@ pub struct Number(pub(crate) i64);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value<'a, T: Text<'a>> {
-    Variable(T::Value),
+    Variable(T, PhantomData<&'a ()>),
     Int(Number),
     Float(f64),
-    String(String),
+    String(T),
     Boolean(bool),
     Null,
-    Enum(T::Value),
+    Enum(T),
     List(Vec<Value<'a, T>>),
-    Object(BTreeMap<T::Value, Value<'a, T>>),
+    Object(BTreeMap<T, Value<'a, T>>),
 }
 
 impl<'a, T: Text<'a>> Value<'a, T> {
     pub fn into_static(&self) -> Value<'static, String> {
         match self {
-            Self::Variable(v) => Value::Variable(v.as_ref().into()),
+            Self::Variable(v, _) => Value::Variable(v.as_ref().into(), PhantomData),
             Self::Int(i) => Value::Int(i.clone()),
             Self::Float(f) => Value::Float(*f),
-            Self::String(s) => Value::String(s.clone()),
+            Self::String(s) => Value::String(s.as_ref().into()),
             Self::Boolean(b) => Value::Boolean(*b),
             Self::Null => Value::Null,
             Self::Enum(v) => Value::Enum(v.as_ref().into()),
@@ -84,13 +81,31 @@ impl<'a, T: Text<'a>> Value<'a, T> {
             ),
         }
     }
+    pub fn as_variable(&self) -> Option<&T> {
+        match self {
+            Value::Variable(s, _) => Some(&s),
+            _ => None,
+        }
+    }
+    pub fn as_string(&self) -> Option<&T> {
+        match self {
+            Value::String(s) => Some(&s),
+            _ => None,
+        }
+    }
+    pub fn as_enum(&self) -> Option<&T> {
+        match self {
+            Value::Enum(e) => Some(&e),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type<'a, T: Text<'a>> {
-    NamedType(T::Value),
+    NamedType(T),
     ListType(Box<Type<'a, T>>),
-    NonNullType(Box<Type<'a, T>>),
+    NonNullType(Box<Type<'a, T>>, PhantomData<&'a ()>),
 }
 
 impl Number {
@@ -109,8 +124,8 @@ impl From<i32> for Number {
 pub fn directives<'a, T>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<Vec<Directive<'a, T>>, TokenStream<'a>>
-where
-    T: Text<'a>,
+    where
+        T: Text<'a>,
 {
     many(
         position()
@@ -123,32 +138,32 @@ where
                 arguments,
             }),
     )
-    .parse_stream(input)
-    .into_result()
+        .parse_stream(input)
+        .into_result()
 }
 
 #[allow(clippy::type_complexity)]
 pub fn arguments<'a, T>(
     input: &mut TokenStream<'a>,
-) -> StdParseResult<Vec<(T::Value, Value<'a, T>)>, TokenStream<'a>>
-where
-    T: Text<'a>,
+) -> StdParseResult<Vec<(T, Value<'a, T>)>, TokenStream<'a>>
+    where
+        T: Text<'a>,
 {
     optional(
         punct("(")
             .with(many1(name::<'a, T>().skip(punct(":")).and(parser(value))))
             .skip(punct(")")),
     )
-    .map(|opt| opt.unwrap_or_default())
-    .parse_stream(input)
-    .into_result()
+        .map(|opt| opt.unwrap_or_default())
+        .parse_stream(input)
+        .into_result()
 }
 
 pub fn int_value<'a, S>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<Value<'a, S>, TokenStream<'a>>
-where
-    S: Text<'a>,
+    where
+        S: Text<'a>,
 {
     kind(T::IntValue)
         .and_then(|tok| tok.value.parse())
@@ -161,8 +176,8 @@ where
 pub fn float_value<'a, S>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<Value<'a, S>, TokenStream<'a>>
-where
-    S: Text<'a>,
+    where
+        S: Text<'a>,
 {
     kind(T::FloatValue)
         .and_then(|tok| tok.value.parse())
@@ -236,8 +251,8 @@ fn unquote_string(s: &str) -> Result<String, Error<Token, Token>> {
                                             "\\u must have 4 characters after it, only found '{}'",
                                             temp_code_point
                                         )
-                                        .to_string(),
-                                    )))
+                                            .to_string(),
+                                    )));
                                 }
                             }
                         }
@@ -251,8 +266,8 @@ fn unquote_string(s: &str) -> Result<String, Error<Token, Token>> {
                                         "{} is not a valid unicode code point",
                                         temp_code_point
                                     )
-                                    .to_string(),
-                                )))
+                                        .to_string(),
+                                )));
                             }
                         }
                     }
@@ -275,18 +290,17 @@ pub fn string<'a>(input: &mut TokenStream<'a>) -> StdParseResult<String, TokenSt
         kind(T::StringValue).and_then(|tok| unquote_string(tok.value)),
         kind(T::BlockString).and_then(|tok| unquote_block_string(tok.value)),
     ))
-    .parse_stream(input)
-    .into_result()
+        .parse_stream(input)
+        .into_result()
 }
 
 pub fn string_value<'a, S>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<Value<'a, S>, TokenStream<'a>>
-where
-    S: Text<'a>,
+    where
+        S: Text<'a>,
 {
-    kind(T::StringValue)
-        .and_then(|tok| unquote_string(tok.value))
+    _string()
         .map(Value::String)
         .parse_stream(input)
         .into_result()
@@ -295,11 +309,10 @@ where
 pub fn block_string_value<'a, S>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<Value<'a, S>, TokenStream<'a>>
-where
-    S: Text<'a>,
+    where
+        S: Text<'a>,
 {
-    kind(T::BlockString)
-        .and_then(|tok| unquote_block_string(tok.value))
+    _blockstring()
         .map(Value::String)
         .parse_stream(input)
         .into_result()
@@ -308,8 +321,8 @@ where
 pub fn plain_value<'a, T>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<Value<'a, T>, TokenStream<'a>>
-where
-    T: Text<'a>,
+    where
+        T: Text<'a>,
 {
     ident("true")
         .map(|_| Value::Boolean(true))
@@ -325,11 +338,13 @@ where
 }
 
 pub fn value<'a, T>(input: &mut TokenStream<'a>) -> StdParseResult<Value<'a, T>, TokenStream<'a>>
-where
-    T: Text<'a>,
+    where
+        T: Text<'a>,
 {
     parser(plain_value)
-        .or(punct("$").with(name::<'a, T>()).map(Value::Variable))
+        .or(punct("$")
+            .with(name::<'a, T>())
+            .map(|v| Value::Variable(v, PhantomData)))
         .or(punct("[")
             .with(many(parser(value)))
             .skip(punct("]"))
@@ -345,8 +360,8 @@ where
 pub fn default_value<'a, T>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<Value<'a, T>, TokenStream<'a>>
-where
-    T: Text<'a>,
+    where
+        T: Text<'a>,
 {
     parser(plain_value)
         .or(punct("[")
@@ -366,8 +381,8 @@ where
 pub fn parse_type<'a, T>(
     input: &mut TokenStream<'a>,
 ) -> StdParseResult<Type<'a, T>, TokenStream<'a>>
-where
-    T: Text<'a>,
+    where
+        T: Text<'a>,
 {
     name::<'a, T>()
         .map(Type::NamedType)
@@ -379,7 +394,7 @@ where
         .and(optional(punct("!")).map(|v| v.is_some()))
         .map(|(typ, strict)| {
             if strict {
-                Type::NonNullType(Box::new(typ))
+                Type::NonNullType(Box::new(typ), PhantomData)
             } else {
                 typ
             }

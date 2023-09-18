@@ -5,8 +5,9 @@
 //!
 //! [graphql grammar]: http://facebook.github.io/graphql/October2016/#sec-Appendix-Grammar-Summary
 //!
+pub use crate::common::{Directive, Number, Text, Type, Value};
 use crate::position::Pos;
-pub use crate::common::{Directive, Number, Value, Text, Type};
+use std::marker::PhantomData;
 
 /// Root of query data
 #[derive(Debug, Clone, PartialEq)]
@@ -17,7 +18,7 @@ pub struct Document<'a, T: Text<'a>> {
 impl<'a> Document<'a, String> {
     pub fn into_static(self) -> Document<'static, String> {
         // To support both reference and owned values in the AST,
-        // all string data is represented with the ::common::Str<'a, T: Text<'a>> 
+        // all string data is represented with the ::common::Str<'a, T: Text<'a>>
         // wrapper type.
         // This type must carry the lifetime of the query string,
         // and is stored in a PhantomData value on the Str type.
@@ -42,7 +43,7 @@ pub enum Definition<'a, T: Text<'a>> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FragmentDefinition<'a, T: Text<'a>> {
     pub position: Pos,
-    pub name: T::Value,
+    pub name: T,
     pub type_condition: TypeCondition<'a, T>,
     pub directives: Vec<Directive<'a, T>>,
     pub selection_set: SelectionSet<'a, T>,
@@ -59,7 +60,7 @@ pub enum OperationDefinition<'a, T: Text<'a>> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query<'a, T: Text<'a>> {
     pub position: Pos,
-    pub name: Option<T::Value>,
+    pub name: Option<T>,
     pub variable_definitions: Vec<VariableDefinition<'a, T>>,
     pub directives: Vec<Directive<'a, T>>,
     pub selection_set: SelectionSet<'a, T>,
@@ -68,7 +69,7 @@ pub struct Query<'a, T: Text<'a>> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mutation<'a, T: Text<'a>> {
     pub position: Pos,
-    pub name: Option<T::Value>,
+    pub name: Option<T>,
     pub variable_definitions: Vec<VariableDefinition<'a, T>>,
     pub directives: Vec<Directive<'a, T>>,
     pub selection_set: SelectionSet<'a, T>,
@@ -77,7 +78,7 @@ pub struct Mutation<'a, T: Text<'a>> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Subscription<'a, T: Text<'a>> {
     pub position: Pos,
-    pub name: Option<T::Value>,
+    pub name: Option<T>,
     pub variable_definitions: Vec<VariableDefinition<'a, T>>,
     pub directives: Vec<Directive<'a, T>>,
     pub selection_set: SelectionSet<'a, T>,
@@ -92,7 +93,7 @@ pub struct SelectionSet<'a, T: Text<'a>> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct VariableDefinition<'a, T: Text<'a>> {
     pub position: Pos,
-    pub name: T::Value,
+    pub name: T,
     pub var_type: Type<'a, T>,
     pub default_value: Option<Value<'a, T>>,
 }
@@ -107,9 +108,9 @@ pub enum Selection<'a, T: Text<'a>> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Field<'a, T: Text<'a>> {
     pub position: Pos,
-    pub alias: Option<T::Value>,
-    pub name: T::Value,
-    pub arguments: Vec<(T::Value, Value<'a, T>)>,
+    pub alias: Option<T>,
+    pub name: T,
+    pub arguments: Vec<(T, Value<'a, T>)>,
     pub directives: Vec<Directive<'a, T>>,
     pub selection_set: SelectionSet<'a, T>,
 }
@@ -117,13 +118,13 @@ pub struct Field<'a, T: Text<'a>> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct FragmentSpread<'a, T: Text<'a>> {
     pub position: Pos,
-    pub fragment_name: T::Value,
+    pub fragment_name: T,
     pub directives: Vec<Directive<'a, T>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeCondition<'a, T: Text<'a>> {
-    On(T::Value),
+    On(T, PhantomData<&'a ()>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

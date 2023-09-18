@@ -17,11 +17,21 @@ pub struct TokenMatch<'a> {
 
 #[derive(Debug, Clone)]
 pub struct NameMatch<'a, T>
-where
-    T: Text<'a>,
+    where
+        T: Text<'a>,
 {
     phantom: PhantomData<&'a T>,
 }
+
+#[derive(Debug, Clone)]
+pub struct StringMatch<'a, T>
+    where
+        T: Text<'a>,
+{
+    block: bool,
+    phantom: PhantomData<&'a T>,
+}
+
 
 #[derive(Debug, Clone)]
 pub struct Value<'a> {
@@ -38,13 +48,32 @@ pub fn kind<'x>(kind: Kind) -> TokenMatch<'x> {
 }
 
 pub fn name<'a, T>() -> NameMatch<'a, T>
-where
-    T: Text<'a>,
+    where
+        T: Text<'a>,
 {
     NameMatch {
         phantom: PhantomData,
     }
 }
+
+pub fn _string<'a, T>() -> StringMatch<'a, T>
+    where T: Text<'a>
+{
+    StringMatch {
+        block: false,
+        phantom: PhantomData,
+    }
+}
+
+pub fn _blockstring<'a, T>() -> StringMatch<'a, T>
+    where T: Text<'a>
+{
+    StringMatch {
+        block: true,
+        phantom: PhantomData,
+    }
+}
+
 
 impl<'a> Parser<TokenStream<'a>> for TokenMatch<'a> {
     type Output = Token<'a>;
@@ -101,10 +130,10 @@ impl<'a> Parser<TokenStream<'a>> for Value<'a> {
 }
 
 impl<'a, S> Parser<TokenStream<'a>> for NameMatch<'a, S>
-where
-    S: Text<'a>,
+    where
+        S: Text<'a>,
 {
-    type Output = S::Value;
+    type Output = S;
     type PartialState = ();
 
     #[inline]
@@ -113,7 +142,7 @@ where
         input: &mut TokenStream<'a>,
     ) -> ParseResult<Self::Output, <TokenStream<'a> as StreamOnce>::Error> {
         satisfy(|c: Token<'a>| c.kind == Kind::Name)
-            .map(|t: Token<'a>| -> S::Value { S::Value::from(t.value) })
+            .map(|t: Token<'a>| -> S { S::from(t.value) })
             .parse_lazy(input)
     }
 
@@ -121,3 +150,32 @@ where
         error.error.add_error(Error::Expected(Info::Static("Name")));
     }
 }
+
+impl<'a, S> Parser<TokenStream<'a>> for StringMatch<'a, S>
+    where
+        S: Text<'a>,
+{
+    type Output = S;
+    type PartialState = ();
+
+    #[inline]
+    fn parse_lazy(
+        &mut self,
+        input: &mut TokenStream<'a>,
+    ) -> ParseResult<Self::Output, <TokenStream<'a> as StreamOnce>::Error> {
+        satisfy(|c: Token<'a>| if self.block { c.kind == Kind::BlockString } else { c.kind == Kind::StringValue })
+            .map(|t: Token<'a>| -> S {
+                if self.block {
+                    S::from(&t.value[3..=t.value.len() - 3])
+                } else {
+                    S::from(&t.value[1..=t.value.len() - 1])
+                }
+            })
+            .parse_lazy(input)
+    }
+
+    fn add_error(&mut self, error: &mut Tracked<Errors<Token<'a>, Token<'a>, Pos>>) {
+        error.error.add_error(Error::Expected(Info::Static("String")));
+    }
+}
+
